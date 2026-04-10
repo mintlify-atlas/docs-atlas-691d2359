@@ -1,0 +1,96 @@
+---
+title: "irtrafficgen run — generate HTTPS traffic to Iran targets"
+description: "Start a worker pool that issues HTTPS operations against Iran geosite and geoip targets. Control rate limits, dry-run mode, and verbosity with CLI flags."
+---
+
+The `run` command starts a pool of concurrent worker goroutines that pick targets from embedded geosite and geoip data, then issue HTTPS operations under a global rate limiter. It is the default subcommand—running `./irtrafficgen` without any subcommand is identical to running `./irtrafficgen run`.
+
+<Note>
+  `run` defaults to dry-run mode. No real network I/O occurs unless you pass `--live` or set `dry_run: false` in your config file.
+</Note>
+
+## Usage
+
+```bash
+./irtrafficgen run [flags]
+./irtrafficgen [flags]
+```
+
+## Flags
+
+<ParamField path="--config" type="string">
+  Path to a YAML configuration file. When omitted, the program starts from built-in defaults (`dry_run: true`, `global_qps: 5`, `max_in_flight: 20`). Any key present in the file is merged over those defaults.
+</ParamField>
+
+<ParamField path="--live" type="boolean">
+  Force real HTTPS and DNS I/O. This flag overrides any `dry_run` value—whether it comes from the config file or from `--dry-run`—and always wins.
+</ParamField>
+
+<ParamField path="--dry-run" type="string">
+  Override the `dry_run` key from the config file. Accepted values: `true`, `1`, `yes` (enable dry-run) or `false`, `0`, `no` (disable dry-run). Omit the flag to use whatever the config file says. Has no effect when `--live` is also set.
+</ParamField>
+
+<ParamField path="--verbose / -v" type="boolean">
+  Print a session metrics summary to stderr when the run stops. Includes `https_attempts`, `https_success`, `bytes_sent`, `bytes_received`, per-operation counts, DNS counters, error classes, and `rx_tx_ratio`.
+</ParamField>
+
+<ParamField path="--once" type="boolean">
+  Perform a single operation and exit. The program acquires one token from the global rate limiter, executes one HTTPS (or dry-run) operation, optionally prints metrics if `--verbose` is set, then returns.
+</ParamField>
+
+## Worker pool behavior
+
+When running in normal (non-`--once`) mode, `run` spawns `max_in_flight` goroutines in parallel. Each worker loops until a signal is received:
+
+1. Wait for a token from the global rate limiter (`global_qps` tokens per second).
+2. Sleep for a random jitter between `jitter_min_ms` and `jitter_max_ms`.
+3. Pick a target from the scheduler (geosite domain or `geoip:ir` IP).
+4. If `per_host_qps` is set, wait for that host's per-host limiter token.
+5. Execute the HTTPS operation (or log a dry-run entry).
+
+All workers share the same global limiter, so the combined throughput across the pool is bounded by `global_qps`.
+
+## Stopping the run
+
+Send `SIGINT` (Ctrl+C) or `SIGTERM` to stop all workers. The program waits for all in-flight goroutines to return before printing the optional metrics summary and exiting.
+
+```bash
+# Stop a running instance
+^C
+```
+
+## Examples
+
+**Dry run with a config file**
+
+```bash
+./irtrafficgen run --config config.example.yaml
+```
+
+**Live mode — sends real HTTPS traffic**
+
+```bash
+./irtrafficgen run --config config.example.yaml --live
+```
+
+<Warning>
+  `--live` sends real HTTPS (and optionally DNS) requests to targets on the public internet. Only use it on networks and targets you own, have written authorization for, or fully control in a lab environment.
+</Warning>
+
+**Single request then exit**
+
+```bash
+./irtrafficgen run --config config.example.yaml --once
+```
+
+**Verbose output — print session metrics at the end**
+
+```bash
+./irtrafficgen run --config config.example.yaml --verbose
+```
+
+**Combine flags**
+
+```bash
+./irtrafficgen run --config config.example.yaml --live --verbose
+```

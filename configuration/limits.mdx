@@ -1,0 +1,89 @@
+---
+title: "Configuring rate limits, concurrency, and per-host QPS"
+description: "Configure global QPS, per-host rate caps, worker concurrency, HTTPS timeouts, and per-request jitter in the irtrafficgen limits section."
+---
+
+The `limits` section controls how fast irtrafficgen sends traffic and how many operations run at the same time. All workers share a single global token bucket; optional per-host buckets add a second layer of control. Jitter introduces a random delay between acquiring a global slot and sending the actual request, which helps spread load and mimic natural traffic patterns.
+
+## Token-bucket rate limiting
+
+irtrafficgen uses a token bucket for `global_qps`. Each worker goroutine waits until a token is available before proceeding. When `per_host_qps` is positive, a second bucket is checked per target host. Both buckets must grant permission before the operation starts.
+
+After the global token is acquired, the worker sleeps for a random duration between `jitter_min_ms` and `jitter_max_ms` milliseconds before issuing the HTTPS request.
+
+## Fields
+
+<ParamField path="limits.global_qps" type="float" required>
+  Maximum number of operations started per second across all workers combined. Must be greater than `0`. This is the primary throughput knob.
+
+  **Default:** `5`
+</ParamField>
+
+<ParamField path="limits.max_in_flight" type="integer" default="20">
+  Number of concurrent worker goroutines. Each worker loops independently, waiting on `global_qps` (and per-host QPS if set) before issuing work. Minimum value is `1`.
+
+  **Default:** `20`
+</ParamField>
+
+<ParamField path="limits.per_host_qps" type="float" default="0.2">
+  Per-host HTTPS rate cap applied on top of the global limit. Set to `0` to disable per-host limiting entirely. Must be non-negative.
+
+  **Default:** `0.2`
+</ParamField>
+
+<ParamField path="limits.https_timeout_seconds" type="integer" default="15">
+  Deadline in seconds for each client operation, covering TLS handshake, request send, and reading the capped response body. Must be at least `1`.
+
+  **Default:** `15`
+</ParamField>
+
+<ParamField path="limits.jitter_min_ms" type="integer" default="50">
+  Minimum random sleep in milliseconds applied after acquiring the global rate-limit slot, before the HTTPS operation begins. Must be less than or equal to `jitter_max_ms`.
+
+  **Default:** `50`
+</ParamField>
+
+<ParamField path="limits.jitter_max_ms" type="integer" default="500">
+  Maximum random sleep in milliseconds. The actual sleep is sampled uniformly between `jitter_min_ms` and `jitter_max_ms`. Must be greater than or equal to `jitter_min_ms`.
+
+  **Default:** `500`
+</ParamField>
+
+## Example
+
+This is the `limits` block from `config.example.yaml`, configured for conservative single-worker testing:
+
+```yaml
+limits:
+  # ~1 request per 11 seconds.
+  global_qps: 0.09
+  # One worker goroutine.
+  max_in_flight: 1
+  # No per-host rate cap.
+  per_host_qps: 0
+  # Each operation must complete within 15 seconds.
+  https_timeout_seconds: 15
+  # Sleep 50–500 ms after acquiring a global slot.
+  jitter_min_ms: 50
+  jitter_max_ms: 500
+```
+
+For higher-throughput testing with per-host protection:
+
+```yaml
+limits:
+  global_qps: 5
+  max_in_flight: 20
+  per_host_qps: 0.5
+  https_timeout_seconds: 10
+  jitter_min_ms: 0
+  jitter_max_ms: 100
+```
+
+<Warning>
+  Setting `jitter_max_ms` lower than `jitter_min_ms` fails validation with: `jitter_max_ms must be >= jitter_min_ms`.
+</Warning>
+
+<Tip>
+  Start with `max_in_flight: 1` and `global_qps` below `1` when testing against a new target. Increase gradually after confirming the target handles the load.
+</Tip>

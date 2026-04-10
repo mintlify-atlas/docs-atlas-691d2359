@@ -1,0 +1,178 @@
+---
+title: "Session metrics and traffic counters for --verbose"
+description: "Metrics are printed to stderr at run end when --verbose is set, covering HTTPS attempts, byte totals, per-op counts, DNS results, and error classes."
+---
+
+When a run completes, irtrafficgen can print a table of session counters to stderr. These counters capture every HTTPS operation, byte transferred, DNS lookup, and error encountered during the session. Metrics are only emitted when `--verbose` is passed on the command line — nothing is written otherwise.
+
+## Enabling metrics output
+
+Pass `--verbose` to the `run` command to print the session metrics table at the end of the run:
+
+```bash
+./irtrafficgen run --config config.example.yaml --live --verbose
+```
+
+The metrics table is written to stderr. All irtrafficgen output — structured operation logs and the metrics table — goes to stderr.
+
+## Metric fields
+
+All counters are `uint64` values accumulated atomically across all worker goroutines. On extremely long-running sessions, theoretical wrap at 2⁶⁴ is possible but not expected in practice.
+
+### HTTPS totals
+
+<ResponseField name="https_attempts" type="uint64">
+  Total number of HTTPS operations attempted. Incremented for every HEAD, GET, or POST operation before the network call is made, regardless of outcome.
+</ResponseField>
+
+<ResponseField name="https_success" type="uint64">
+  Number of HTTPS operations that completed without error. Only incremented after a successful response is received and the body (if any) is fully read.
+</ResponseField>
+
+### Byte counters
+
+<ResponseField name="bytes_sent" type="uint64">
+  Total bytes sent across all operations. For POST operations this includes the request body. In dry-run mode, estimated values from `upload_max_bytes` are used instead of actual bytes.
+</ResponseField>
+
+<ResponseField name="bytes_received" type="uint64">
+  Total bytes received across all operations. For GET operations this includes capped response body bytes. In dry-run mode, estimated values from `download_max_bytes` are credited.
+</ResponseField>
+
+### Per-operation counters
+
+Each HTTP operation type — HEAD, GET, and POST — has its own attempt and success pair. These are only populated when `asymmetric.enabled: true`; with asymmetric disabled, only `head_attempts` and `head_success` will be non-zero.
+
+<ResponseField name="head_attempts" type="uint64">
+  Number of HEAD operations started.
+</ResponseField>
+
+<ResponseField name="head_success" type="uint64">
+  Number of HEAD operations that succeeded.
+</ResponseField>
+
+<ResponseField name="get_attempts" type="uint64">
+  Number of GET operations started.
+</ResponseField>
+
+<ResponseField name="get_success" type="uint64">
+  Number of GET operations that succeeded.
+</ResponseField>
+
+<ResponseField name="post_attempts" type="uint64">
+  Number of POST operations started.
+</ResponseField>
+
+<ResponseField name="post_success" type="uint64">
+  Number of POST operations that succeeded.
+</ResponseField>
+
+### DNS counters
+
+DNS counters are only non-zero when `dns_enabled: true` in the config. The DNS lookup is performed after a hostname target is sampled and before the HTTPS operation; its result does not affect target selection.
+
+<ResponseField name="dns_success" type="uint64">
+  Number of DNS lookups that resolved without error.
+</ResponseField>
+
+<ResponseField name="dns_errors" type="uint64">
+  Number of DNS lookups that returned an error.
+</ResponseField>
+
+<Note>
+  `dns_attempts` is not printed in the metrics table, but is tracked internally. The total number of DNS lookups attempted equals `dns_success + dns_errors`.
+</Note>
+
+### Error classification
+
+Each failed HTTPS operation increments exactly one error class counter. Classification is performed by `gen.ClassifyHTTPSError`.
+
+<ResponseField name="err_timeout" type="uint64">
+  Operations that failed due to a deadline or context timeout. Controlled by `limits.https_timeout_seconds` in the config.
+</ResponseField>
+
+<ResponseField name="err_tls" type="uint64">
+  Operations that failed during TLS handshake or certificate verification. Set `insecure_tls: true` to skip certificate checks in test environments.
+</ResponseField>
+
+<ResponseField name="err_http" type="uint64">
+  Operations that received an HTTP-level error (e.g., non-success status code treated as an error, or protocol-level failure after TLS succeeded).
+</ResponseField>
+
+<ResponseField name="err_other" type="uint64">
+  Operations that failed with any error not classified as timeout, TLS, or HTTP — for example, connection refused, network unreachable, or DNS errors that were not caught before the HTTPS attempt.
+</ResponseField>
+
+### Ratio
+
+<ResponseField name="rx_tx_ratio" type="float64">
+  The ratio of `bytes_received` to `bytes_sent` for the session (`bytes_received / bytes_sent`). Only printed when `bytes_sent > 0`. If `bytes_sent` is zero but `bytes_received` is non-zero, the value is printed as `inf (tx=0)`. This field is omitted when both are zero.
+</ResponseField>
+
+<Tip>
+  When `asymmetric.target_rx_tx_ratio` is set, the scheduler biases operation weights over time to approach that ratio. Comparing `rx_tx_ratio` in the metrics output against your configured target is an easy way to verify the bias is working.
+</Tip>
+
+## Example output
+
+Running with `--verbose` produces a metrics block like the following after the workers stop:
+
+```bash
+./irtrafficgen run --config config.example.yaml --live --verbose
+```
+
+```
+Session metrics
+metric          count
+https_attempts  120
+https_success   113
+bytes_sent      48200
+bytes_received  1843200
+head_attempts   40
+head_success    38
+get_attempts    60
+get_success     57
+post_attempts   20
+post_success    18
+err_timeout     4
+err_tls         1
+err_http        2
+err_other       0
+dns_success     0
+dns_errors      0
+rx_tx_ratio     38.2
+```
+
+<Info>
+  DNS counters are zero in this example because `dns_enabled` is false. Enable DNS lookups in your config to populate those fields.
+</Info>
+
+## Counter implementation
+
+Counters are declared as `sync/atomic.Uint64` fields on the `metrics.Counters` struct (`internal/metrics/metrics.go`). All workers share a single `Counters` instance and increment fields atomically, so no locking is required and there is no per-worker aggregation step.
+
+```go
+type Counters struct {
+    Attempts      atomic.Uint64
+    Successes     atomic.Uint64
+    ErrTimeout    atomic.Uint64
+    ErrTLS        atomic.Uint64
+    ErrHTTP       atomic.Uint64
+    ErrOther      atomic.Uint64
+    DNSAttempts   atomic.Uint64
+    DNSSuccesses  atomic.Uint64
+    DNSErrors     atomic.Uint64
+    BytesSent     atomic.Uint64
+    BytesReceived atomic.Uint64
+    HeadAttempts  atomic.Uint64
+    HeadSuccesses atomic.Uint64
+    GetAttempts   atomic.Uint64
+    GetSuccesses  atomic.Uint64
+    PostAttempts  atomic.Uint64
+    PostSuccesses atomic.Uint64
+}
+```
+
+<Warning>
+  All counters are `uint64` and will silently wrap to zero if they overflow 2⁶⁴ (approximately 1.8 × 10¹⁹). This is not a concern for typical runs but should be noted for any long-running automated workloads.
+</Warning>

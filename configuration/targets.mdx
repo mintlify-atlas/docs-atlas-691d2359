@@ -1,0 +1,105 @@
+---
+title: "Target selection: geosite domain lists and GeoIP CIDRs"
+description: "How irtrafficgen samples request targets from embedded geosite domain lists and geoip:ir CIDRs, and how to tune selection weights per source."
+---
+
+Every worker tick begins by picking a target—either a domain name from one of the embedded geosite lists or a random public IP address from the `geoip:ir` CIDR set. The `geosite_lists` key controls which domain lists are eligible, and the `weights` section determines how often each source is chosen relative to the others.
+
+## Geosite lists
+
+irtrafficgen embeds a V2Ray-format `geosite.dat` file containing named lists of domain rules. The `geosite_lists` key accepts three distinct forms:
+
+| Value | Behavior |
+|-------|----------|
+| Omitted / YAML `null` | Auto-discover every list whose code matches `category-*-ir` (case-insensitive). This is the default. |
+| `[]` (empty array) | Disable geosite entirely. Only `geoip:ir` targets are sampled. Requires `weights.geoip_ir > 0`. |
+| Named string array | Use exactly the listed codes. Every name must exist in the embedded `geosite.dat`. |
+
+Run `irtrafficgen inspect` to print all available list codes and their rule counts before setting explicit names.
+
+<Note>
+  If `geosite_lists` is an empty array and `weights.geoip_ir` is `0`, validation fails with: `need geosite_lists or positive geoip_ir weight`.
+</Note>
+
+## GeoIP sampling
+
+When the sampler selects a `geoip:ir` target, it draws a random public IPv4 or IPv6 address from the embedded `geoip:ir` CIDRs. The `safety.deny_private_ips` flag (enabled by default) causes private and reserved addresses to be skipped so only routable public IPs are used.
+
+TLS connections to IP targets require a Server Name for many servers. Set `sni_for_ip` at the top level to provide one.
+
+## Root-domain rules
+
+Some geosite entries are **root-domain** rules rather than exact hostnames. When `www_root_domain: true` is set at the top level, irtrafficgen prefixes these entries with `www.` (for example, `example.ir` becomes `www.example.ir`). When `false`, the bare apex is used.
+
+## Weights
+
+<ParamField path="weights.geoip_ir" type="float" default="2">
+  Relative sampling weight for the `geoip:ir` source. Set to `0` to disable IP targets entirely. The weight is compared against the sum of all active geosite list weights.
+</ParamField>
+
+<ParamField path="weights.geosite" type="object">
+  Map of geosite list code to its relative sampling weight. Keys must match codes present in `geosite_lists`. Any list not mentioned here is assigned a weight of `2.0` at validation time. Values must be positive.
+
+  ```yaml
+  weights:
+    geosite:
+      category-news-ir: 3
+      category-gov-ir: 1
+  ```
+</ParamField>
+
+The sampler draws from all sources proportionally. If `geoip_ir` is `2` and a single geosite list has weight `2`, IP targets are chosen 50% of the time.
+
+<Warning>
+  The sum of `weights.geoip_ir` and all active geosite weights must be positive. If every weight is `0`, validation fails.
+</Warning>
+
+## Finding valid list names
+
+Use the `inspect` subcommand to list every code in the embedded `geosite.dat`:
+
+```bash
+irtrafficgen inspect
+```
+
+The output shows each list code and its rule count. Only codes that appear here are valid values in `geosite_lists`.
+
+## Examples
+
+**Auto-discover all Iran geosite lists (default behavior):**
+
+```yaml
+# geosite_lists is omitted — auto-picks every category-*-ir list.
+weights:
+  geoip_ir: 2
+```
+
+**GeoIP-only mode:**
+
+```yaml
+geosite_lists: []
+
+weights:
+  geoip_ir: 1
+
+safety:
+  deny_private_ips: true
+```
+
+**Explicit lists with custom weights:**
+
+```yaml
+geosite_lists:
+  - category-news-ir
+  - category-gov-ir
+  - category-porn-ir
+
+weights:
+  geoip_ir: 0
+  geosite:
+    category-news-ir: 5
+    category-gov-ir: 2
+    # category-porn-ir is omitted; defaults to 2.0
+
+www_root_domain: true
+```

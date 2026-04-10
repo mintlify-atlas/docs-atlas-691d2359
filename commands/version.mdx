@@ -1,0 +1,49 @@
+---
+title: "irtrafficgen version — display build version info"
+description: "Print the version string and commit hash embedded in the binary at build time via ldflags. The version defaults to the value in version.go when not overridden."
+---
+
+The `version` command prints the release version and the Git commit hash that were embedded in the binary at build time. It reads these values from the `internal/version` package, where they are set by the linker through `-ldflags` during `make build`.
+
+## Usage
+
+```bash
+./irtrafficgen version
+```
+
+The command takes no flags.
+
+## How version is set at build time
+
+The `internal/version` package declares two package-level variables with fallback values used when ldflags are not supplied at build time:
+
+```go
+var Version = "0.5.1"
+var Commit = "none"
+```
+
+The Makefile (and the release workflow) overrides these defaults by passing `-ldflags` to `go build`:
+
+```bash
+VERSION=1.0.0 make build
+```
+
+When `VERSION` is not set, the binary reports the default value hardcoded in `version.go` (currently `0.5.1`) rather than `dev`. The `Commit` variable defaults to `"none"` when git is unavailable.
+
+## The internal/version package
+
+`internal/version` is the single source of truth for build metadata inside the program. Both the `version` command and the root `--version` flag (handled by the CLI framework) read from this package. Keeping version data in one package makes it easy to reference from any part of the codebase without circular imports.
+
+## Example output
+
+A release build stamped with `VERSION=1.0.0` and a full commit hash prints something similar to:
+
+```
+version=1.0.0 commit=a3f9c12
+```
+
+A binary built without setting `VERSION` prints:
+
+```
+version=dev commit=none
+```

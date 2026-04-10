@@ -1,97 +1,75 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "irtrafficgen: Iran-focused HTTPS traffic generator"
+description: "irtrafficgen generates realistic HTTPS traffic to Iran-related targets for authorized lab testing, using embedded V2Ray geosite and geoip datasets."
 ---
 
-## Setting up
+irtrafficgen is a command-line tool for generating HTTPS traffic toward Iran-related internet targets. It samples domains and IP addresses from embedded V2Ray-format `geosite.dat` and `geoip.dat` datasets, then issues HTTP operations under configurable rate limits. Use it in authorized lab environments to simulate realistic traffic patterns to Iranian internet infrastructure.
 
-Get your documentation site up and running in minutes.
+<Warning>
+  **Authorized use only.** Run irtrafficgen only on networks and targets you own, have written authorization for, or fully control in a lab. The `--live` flag sends real network traffic and is entirely your responsibility.
+</Warning>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build and run irtrafficgen in minutes with a working dry-run example
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Installation" icon="download" href="/installation">
+    Install from source, pre-built binary, or Docker container
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Configuration" icon="sliders" href="/configuration/overview">
+    Customize QPS limits, target weights, asymmetric profiles, and safety rules
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Command reference" icon="terminal" href="/commands/run">
+    Full reference for the run, inspect, and version commands
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How it works
 
-Everything you need to create world-class documentation.
+irtrafficgen embeds `geosite.dat` and `geoip.dat` from the V2Ray project. At startup it loads these datasets and builds a weighted target sampler. Each worker tick picks a target — either a domain from a geosite list or a public IP from `geoip:ir` CIDRs — then issues an HTTPS operation.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="Rate limiting" icon="gauge" href="/configuration/limits">
+    Global QPS token bucket plus optional per-host caps and jitter
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Asymmetric traffic" icon="arrow-right-arrow-left" href="/configuration/asymmetric">
+    Mix HEAD, GET, and POST operations with download/upload caps
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Target selection" icon="bullseye" href="/configuration/targets">
+    Geosite lists, GeoIP CIDRs, and per-list sampling weights
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Session metrics" icon="chart-bar" href="/operations/metrics">
+    Per-operation counters, byte totals, DNS stats, and error classes
   </Card>
-</Columns>
+</CardGroup>
 
-## Need inspiration?
+## Quick example
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+```bash
+# Build the binary
+make check-assets build
+
+# Inspect embedded geo datasets
+./irtrafficgen inspect
+
+# Run in dry-run mode (no real network I/O)
+./irtrafficgen run --config config.example.yaml
+
+# Run with real HTTPS traffic (authorized environments only)
+./irtrafficgen run --config config.example.yaml --live
+```
+
+<Steps>
+  <Step title="Build the binary">
+    Run `make check-assets build` to verify that embedded `.dat` files are present and compile the binary.
+  </Step>
+  <Step title="Inspect geo data">
+    Run `./irtrafficgen inspect` to verify that `geosite.dat` and `geoip.dat` loaded correctly and see the available Iran-related lists.
+  </Step>
+  <Step title="Configure your run">
+    Copy `config.example.yaml` and adjust `limits.global_qps`, `max_in_flight`, and target weights for your lab environment.
+  </Step>
+  <Step title="Send traffic">
+    Run with `--live` to send real HTTPS requests. Add `--verbose` to print a session metrics summary when the run stops.
+  </Step>
+</Steps>

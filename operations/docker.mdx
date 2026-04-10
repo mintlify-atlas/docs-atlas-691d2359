@@ -1,0 +1,111 @@
+---
+title: "Run irtrafficgen inside a minimal Docker container"
+description: "Package irtrafficgen in Alpine, mount your config to /etc/irtrafficgen/config.yaml, and start a live run using the built-in entrypoint."
+---
+
+The included Dockerfile packages irtrafficgen into a small Alpine-based image. The default entrypoint is configured to start a live run immediately when the container starts — you only need to mount a config file at the expected path. No additional arguments are required for a standard run.
+
+## Dockerfile
+
+The image uses a two-stage build: a `golang:1.25-alpine` stage compiles the binary, and an `alpine:3.21` runtime stage copies in the resulting binary and CA certificates.
+
+```dockerfile
+FROM golang:1.25-alpine AS build
+RUN apk add --no-cache ca-certificates
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /irtrafficgen .
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
+COPY --from=build /irtrafficgen /irtrafficgen
+ENTRYPOINT ["/irtrafficgen", "run", "--config", "/etc/irtrafficgen/config.yaml", "--live"]
+```
+
+The runtime image only contains the static binary and CA certificates — no Go toolchain or source code is present.
+
+<Note>
+  The Dockerfile build stage uses `golang:1.25-alpine`. If you are building the image from source, ensure your Docker environment can pull that tag. The runtime stage uses `alpine:3.21`.
+</Note>
+
+## Build the image
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/arastu/irtrafficgen.git
+    cd irtrafficgen
+    ```
+  </Step>
+  <Step title="Build the Docker image">
+    ```bash
+    docker build -t irtrafficgen .
+    ```
+
+    The build stage downloads Go module dependencies and compiles the binary with CGO disabled, producing a fully static executable.
+  </Step>
+</Steps>
+
+## Run with a config file
+
+The entrypoint expects a config file at `/etc/irtrafficgen/config.yaml` inside the container. Mount your local config file to that path:
+
+```bash
+docker run -v /path/to/your/config.yaml:/etc/irtrafficgen/config.yaml irtrafficgen
+```
+
+The `--live` flag is already embedded in the entrypoint, so real HTTPS traffic will be sent as soon as the container starts. Make sure your config file is correct before running.
+
+<Warning>
+  The `--live` flag in the default entrypoint means the container will immediately send real network traffic. Review your config file — particularly `limits.global_qps`, `limits.max_in_flight`, and target lists — before running the container on a production network.
+</Warning>
+
+## Override the entrypoint
+
+You can override the default entrypoint to run in dry-run mode, inspect embedded data, or pass additional flags.
+
+<Tabs>
+  <Tab title="Dry-run">
+    Run without sending real traffic by overriding the `--live` flag:
+
+    ```bash
+    docker run \
+      -v /path/to/your/config.yaml:/etc/irtrafficgen/config.yaml \
+      --entrypoint /irtrafficgen \
+      irtrafficgen run --config /etc/irtrafficgen/config.yaml --dry-run true
+    ```
+  </Tab>
+  <Tab title="Inspect mode">
+    Print embedded geosite and geoip data without running any traffic:
+
+    ```bash
+    docker run --entrypoint /irtrafficgen irtrafficgen inspect
+    ```
+  </Tab>
+  <Tab title="Verbose run">
+    Run with metrics output at the end of the session:
+
+    ```bash
+    docker run \
+      -v /path/to/your/config.yaml:/etc/irtrafficgen/config.yaml \
+      --entrypoint /irtrafficgen \
+      irtrafficgen run --config /etc/irtrafficgen/config.yaml --live --verbose
+    ```
+  </Tab>
+</Tabs>
+
+## Container behavior
+
+Because the default entrypoint includes `--live`, the container behaves as follows:
+
+| Scenario | Behavior |
+|----------|----------|
+| Config file mounted at `/etc/irtrafficgen/config.yaml` | Starts a live continuous run using the mounted config |
+| No config file mounted | Exits immediately with a config-load error |
+| `SIGINT` or `SIGTERM` sent to the container | Workers drain and the process exits cleanly |
+
+<Tip>
+  Send `docker stop` (which issues `SIGTERM`) to gracefully stop a running container. If `--verbose` is in the entrypoint args, the metrics table will be printed to stderr before exit.
+</Tip>

@@ -1,0 +1,58 @@
+---
+title: "irtrafficgen inspect — verify embedded geosite and geoip"
+description: "Print a summary of every geosite list and the geoip:ir CIDR ranges compiled into the binary. Exits with code 1 if geoip:ir is absent from geoip.dat."
+---
+
+The `inspect` command reads the `geosite.dat` and `geoip.dat` files embedded in the binary and prints a human-readable summary. It is the fastest way to confirm that the embedded data is intact, to find valid geosite list names for your config, and to check the `geoip:ir` CIDR coverage before running traffic.
+
+## Usage
+
+```bash
+./irtrafficgen inspect
+```
+
+The command takes no flags.
+
+## What inspect prints
+
+`inspect` runs two phases and logs the results to stderr:
+
+**Geosite phase** — for each list entry found in `geosite.dat`, prints the list code and its rule count. Use these codes as values in the `geosite_lists` array of your config file.
+
+**GeoIP phase** — for the `geoip:ir` country entry in `geoip.dat`, prints the number of IPv4 and IPv6 CIDR ranges. If `geoip:ir` is not present in the file, `inspect` logs an error and exits with code `1`.
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Both `geosite.dat` and `geoip.dat` loaded successfully and `geoip:ir` is present. |
+| `1` | `geoip:ir` is missing from the embedded `geoip.dat`. The binary cannot generate IP targets. |
+| `2` | Failed to parse or decompress one of the embedded `.dat` files. |
+
+<Warning>
+  If `inspect` exits with code `1`, the `run` command will also fail at startup. Rebuild with a valid `geoip.dat` that contains an `IR` entry before proceeding.
+</Warning>
+
+## When to run inspect
+
+<Steps>
+  <Step title="After updating embedded .dat files">
+    Replace the files under `internal/assets/`, rebuild, then run `inspect` to confirm the new data loaded correctly and `geoip:ir` is present.
+
+    ```bash
+    make check-assets build
+    ./irtrafficgen inspect
+    ```
+  </Step>
+  <Step title="To find valid geosite list names">
+    The codes printed by `inspect` are the only values accepted by `geosite_lists` in the config file. Use `inspect` to discover which lists are available before editing your YAML.
+  </Step>
+  <Step title="To verify embedded data integrity">
+    Run `inspect` alongside the embedded-data test to catch parse errors and missing entries before a traffic run:
+
+    ```bash
+    ./irtrafficgen inspect
+    go test ./... -run TestDefaultValidateEmbedded
+    ```
+  </Step>
+</Steps>

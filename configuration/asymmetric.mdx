@@ -1,0 +1,173 @@
+---
+title: "Asymmetric traffic: GET, POST, and HEAD operations"
+description: "Enable download-heavy GET and upload POST operations with bandwidth caps, concurrency limits, and closed-loop ratio control in the asymmetric section."
+---
+
+By default, irtrafficgen sends only HTTPS `HEAD` requests to `/`. Enabling the `asymmetric` section adds `GET` (capped-body download) and `POST` (zero-filled upload) operations. Each worker tick samples an operation type by weight, allowing you to model realistic traffic ratios—for example, heavy downloads with rare uploads.
+
+<Warning>
+  Large `GET` and `POST` operations can consume significant bandwidth. Use only on networks you own or have written authorization for, and set conservative byte caps before increasing throughput.
+</Warning>
+
+## How it works
+
+When `asymmetric.enabled` is `true`:
+
+- Each tick samples `head`, `get`, or `post` according to `operation_weights`.
+- `GET` reads up to `download_max_bytes` of the response body using a `LimitReader`.
+- `POST` sends a zero-filled body of exactly `upload_max_bytes` bytes.
+- `HEAD` sends no body and reads no body; it contributes `head_estimate_rx_bytes` / `head_estimate_tx_bytes` to session byte counters.
+
+When `asymmetric.enabled` is `false` (the default), the program behaves like the original tool: `HEAD` only, no byte tracking, no extra transport configuration.
+
+## Dry-run behavior
+
+In dry-run mode, the same operation mix is sampled as in live mode, but no TLS handshake, DNS lookup, or HTTP I/O occurs. Estimated byte counts from `download_max_bytes`, `upload_max_bytes`, and the HEAD estimates are still accumulated in session metrics so you can verify your ratio settings before going live.
+
+## Fields
+
+<ParamField path="asymmetric.enabled" type="boolean" default="false">
+  Enable asymmetric mode. When `true`, `download_max_bytes` and `upload_max_bytes` must both be at least `1`.
+</ParamField>
+
+### Operation weights
+
+<ParamField path="asymmetric.operation_weights.head" type="float">
+  Relative probability of choosing a `HEAD` operation. All three weights must be non-negative and their sum must be positive.
+</ParamField>
+
+<ParamField path="asymmetric.operation_weights.get" type="float">
+  Relative probability of choosing a `GET` (capped download) operation.
+</ParamField>
+
+<ParamField path="asymmetric.operation_weights.post" type="float">
+  Relative probability of choosing a `POST` (upload) operation.
+</ParamField>
+
+### Byte caps
+
+<ParamField path="asymmetric.download_max_bytes" type="integer" required>
+  Maximum bytes read from each `GET` response body. Enforced with a `LimitReader`; the connection is closed after this many bytes. Required when `enabled: true`. Must be at least `1`.
+</ParamField>
+
+<ParamField path="asymmetric.upload_max_bytes" type="integer" required>
+  Exact size of the zero-filled `POST` body sent per operation. Required when `enabled: true`. Must be at least `1`.
+</ParamField>
+
+<ParamField path="asymmetric.total_download_cap_bytes" type="integer" default="0">
+  Session-level cap on total bytes attributed to large downloads. Once the session total reaches this value, further `GET` operations are downgraded to `HEAD`. Set to `0` for unlimited.
+</ParamField>
+
+<ParamField path="asymmetric.total_upload_cap_bytes" type="integer" default="0">
+  Session-level cap on total bytes attributed to uploads. Once reached, further `POST` operations are downgraded to `HEAD`. Set to `0` for unlimited.
+</ParamField>
+
+### Closed-loop ratio control
+
+<ParamField path="asymmetric.target_rx_tx_ratio" type="float" default="0">
+  If greater than `0`, the operation weights are slowly biased at runtime to drive the session `bytes_received / bytes_sent` ratio toward this value. Set to `0` to keep fixed weights.
+</ParamField>
+
+<ParamField path="asymmetric.ratio_adjust_interval_seconds" type="integer" default="30">
+  Minimum seconds between ratio-based weight adjustments. If `0` and `target_rx_tx_ratio > 0`, validation sets this to `30`.
+</ParamField>
+
+### Concurrency and paths
+
+<ParamField path="asymmetric.max_concurrent_large_downloads" type="integer" default="2">
+  Maximum number of simultaneous `GET` operations across all workers. If `operation_weights.get > 0` and this value is less than `1`, validation sets it to `2`.
+</ParamField>
+
+<ParamField path="asymmetric.get_path" type="string" default="/">
+  URL path used for `GET` requests. Must start with `/`. Empty or missing values are normalized to `/`.
+</ParamField>
+
+<ParamField path="asymmetric.post_path" type="string" default="/">
+  URL path used for `POST` requests. Must start with `/`. Empty or missing values are normalized to `/`.
+</ParamField>
+
+### Throughput limits
+
+<ParamField path="asymmetric.global_qps_large" type="float" default="0">
+  An additional token bucket applied only to `GET` operations. Set to `0` to use only `limits.global_qps` for GET throughput control. Must be non-negative.
+</ParamField>
+
+<ParamField path="asymmetric.receive_bytes_per_second" type="float" default="0">
+  Throttle downstream body reads to this many bytes per second. Set to `0` to disable receive throttling.
+</ParamField>
+
+<ParamField path="asymmetric.send_bytes_per_second" type="float" default="0">
+  Throttle upstream `POST` body writes to this many bytes per second. Set to `0` to disable send throttling.
+</ParamField>
+
+### Transport settings
+
+<ParamField path="asymmetric.max_redirects" type="integer" default="3">
+  Maximum redirects followed per request. `0` at validation time is set to `3`.
+</ParamField>
+
+<ParamField path="asymmetric.transport_max_idle_conns_per_host" type="integer" default="32">
+  HTTP transport keep-alive pool size per host. `0` at validation time is set to `32`.
+</ParamField>
+
+<ParamField path="asymmetric.transport_idle_conn_timeout_seconds" type="integer" default="90">
+  How long an idle keep-alive connection is kept in the pool before being closed. `0` at validation time is set to `90`.
+</ParamField>
+
+### HEAD estimates
+
+<ParamField path="asymmetric.head_estimate_rx_bytes" type="integer" default="4096">
+  Bytes credited to `bytes_received` in session metrics for each successful `HEAD` operation when asymmetric mode is on. `0` at validation time is set to `4096`.
+</ParamField>
+
+<ParamField path="asymmetric.head_estimate_tx_bytes" type="integer" default="4096">
+  Bytes credited to `bytes_sent` in session metrics for each successful `HEAD` operation. `0` at validation time is set to `4096`.
+</ParamField>
+
+## Full example
+
+This is the complete `asymmetric` block from `config.example.yaml`, with GET-dominant weights and no ratio control:
+
+```yaml
+asymmetric:
+  enabled: true
+  operation_weights:
+    head: 1
+    get: 9
+    post: 0
+  download_max_bytes: 1048576    # 1 MiB per GET
+  upload_max_bytes: 65536        # 64 KiB per POST
+  target_rx_tx_ratio: 0          # fixed weights only
+  ratio_adjust_interval_seconds: 30
+  max_concurrent_large_downloads: 2
+  get_path: /
+  post_path: /
+  global_qps_large: 0            # no extra GET rate cap
+  receive_bytes_per_second: 0    # no throttle
+  send_bytes_per_second: 0
+  max_redirects: 3
+  transport_max_idle_conns_per_host: 32
+  transport_idle_conn_timeout_seconds: 90
+  total_download_cap_bytes: 0    # unlimited
+  total_upload_cap_bytes: 0
+  head_estimate_rx_bytes: 4096
+  head_estimate_tx_bytes: 4096
+```
+
+**High download ratio with closed-loop control (lab only):**
+
+```yaml
+asymmetric:
+  enabled: true
+  operation_weights:
+    head: 1
+    get: 9
+    post: 0
+  download_max_bytes: 524288     # 512 KiB
+  upload_max_bytes: 4096
+  target_rx_tx_ratio: 20         # aim for 20:1 RX/TX
+  ratio_adjust_interval_seconds: 30
+  max_concurrent_large_downloads: 4
+  receive_bytes_per_second: 1048576  # cap at 1 MiB/s
+  total_download_cap_bytes: 104857600  # 100 MiB session cap
+```

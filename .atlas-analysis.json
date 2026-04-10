@@ -1,0 +1,74 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "irtrafficgen",
+  "projectDescription": "An Iran-focused HTTPS traffic generator for authorized lab and network testing, sampling targets from embedded V2Ray geosite and geoip datasets.",
+  "theme": "aspen",
+  "primaryColor": "#f44b34",
+  "lightColor": "#ac3324",
+  "darkColor": "#3c2c04",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/limits",
+              "configuration/targets",
+              "configuration/asymmetric",
+              "configuration/safety"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "commands/run",
+              "commands/inspect",
+              "commands/version"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/metrics",
+              "operations/docker",
+              "operations/building"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Embedded V2Ray geosite.dat and geoip.dat for Iran-specific target sampling",
+    "Global and per-host QPS rate limiting with token-bucket algorithm",
+    "Asymmetric traffic profiles with configurable HEAD/GET/POST operation weights",
+    "Dry-run mode for safe pre-flight inspection without real network I/O",
+    "Optional DNS pre-resolution with custom DNS server support",
+    "Session metrics tracking (bytes sent/received, per-op counts, error classes)",
+    "Docker support for containerized deployment",
+    "Closed-loop RX/TX ratio controller for realistic traffic shaping"
+  ],
+  "publicApiSurface": [
+    "irtrafficgen run [--config <path>] [--live] [--dry-run true|false] [--verbose] [--once]",
+    "irtrafficgen inspect",
+    "irtrafficgen version",
+    "config.Load(path string) (*Config, error)",
+    "config.Validate(c *Config, site *GeoSiteList, ip *GeoIPList) error",
+    "config.Default() *Config",
+    "gen.NewIranScheduler(cfg, site, ipList, rng) (*IranScheduler, error)",
+    "gen.HTTPSOperation(ctx, cfg, host, ip, op, opLim) (*OpResult, error)",
+    "geo.LoadEmbeddedGeoSite() (*GeoSiteList, error)",
+    "geo.LoadEmbeddedGeoIP() (*GeoIPList, error)"
+  ]
+}

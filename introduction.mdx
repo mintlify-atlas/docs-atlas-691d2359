@@ -1,0 +1,54 @@
+---
+title: "irtrafficgen: Iran traffic generator for lab testing"
+description: "irtrafficgen generates HTTPS traffic to Iran-related targets using embedded V2Ray geosite and geoip data for authorized lab and network testing."
+---
+
+irtrafficgen is a command-line tool that generates HTTPS traffic toward Iran-related internet targets. It samples domains and IP addresses from embedded V2Ray-format `geosite.dat` and `geoip.dat` datasets, then issues HTTP operations under configurable rate limits. This page explains what irtrafficgen does, what it is designed for, and how to navigate the rest of the documentation.
+
+<Warning>
+  **Authorized use only.** irtrafficgen can send real HTTPS (and optional DNS) traffic to hosts and IP ranges on the internet. Run it only on networks and targets you own, have written authorization for, or fully control in a lab. The `--live` flag sends real network traffic and is entirely your responsibility. Misuse may violate law or contracts.
+</Warning>
+
+## What irtrafficgen does
+
+irtrafficgen embeds `geosite.dat` and `geoip.dat` from the V2Ray project directly in the binary. At startup it loads these datasets and builds a weighted target sampler. Each worker tick picks a target — either a domain from a geosite list or a public IP from `geoip:ir` CIDRs — then issues an HTTPS operation under global QPS limits.
+
+By default the tool runs in **dry-run mode**, which logs planned operations without making any real network connections. Pass `--live` to send real traffic.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Embedded geo datasets" icon="database" href="/configuration/targets">
+    V2Ray `geosite.dat` and `geoip.dat` are compiled into the binary. No external dataset download is required at runtime.
+  </Card>
+  <Card title="Rate limiting and jitter" icon="gauge" href="/configuration/limits">
+    Global QPS token bucket, optional per-host caps, and configurable jitter keep traffic within defined bounds.
+  </Card>
+  <Card title="Asymmetric traffic profiles" icon="arrow-right-arrow-left" href="/configuration/asymmetric">
+    Mix HEAD, capped-body GET, and POST operations with per-session download and upload caps.
+  </Card>
+  <Card title="Safe by default" icon="shield" href="/configuration/safety">
+    Defaults to dry-run mode. Private IP filtering and domain suffix allowlists prevent accidental traffic to unintended targets.
+  </Card>
+  <Card title="Session metrics" icon="chart-bar" href="/operations/metrics">
+    Per-operation counters, byte totals, DNS stats, and error classes printed on exit with `--verbose`.
+  </Card>
+  <Card title="Inspect embedded data" icon="magnifying-glass" href="/commands/inspect">
+    The `inspect` command shows geosite list codes, rule counts, and `geoip:ir` CIDR stats before any traffic is sent.
+  </Card>
+</CardGroup>
+
+## How targets are selected
+
+| Source | When used |
+|--------|-----------|
+| **Geosite lists** | Domain names from embedded lists. If `geosite_lists` is omitted, every list matching `category-*-ir` is used automatically. |
+| **`geoip:ir`** | Random public IPv4/IPv6 from embedded `geoip:ir` CIDRs, subject to `safety.deny_private_ips`. |
+
+Each worker tick picks a target, then picks an operation — `HEAD`, `GET`, or `POST` — according to configured weights when asymmetric mode is enabled. Without asymmetric mode, all operations are `HEAD`.
+
+## Get started
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Build irtrafficgen from source and run your first dry-run in minutes.
+</Card>

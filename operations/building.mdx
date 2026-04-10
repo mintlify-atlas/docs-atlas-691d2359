@@ -1,0 +1,141 @@
+---
+title: "Build irtrafficgen from source using the Make targets"
+description: "Use make build or make all to compile the binary, set version via ldflags, and replace embedded geosite and geoip .dat files before rebuilding."
+---
+
+irtrafficgen is a standard Go module with a small Makefile that covers building, testing, linting, and asset verification. The binary embeds `geosite.dat` and `geoip.dat` at compile time, so those files must be present before you build.
+
+## Prerequisites
+
+- **Go 1.24 or later** — the module uses standard library features available since Go 1.24.
+- **Git LFS** — the embedded `.dat` files in `internal/assets/` may be stored with [Git LFS](https://git-lfs.com/). Install and configure Git LFS before cloning to ensure the files are downloaded rather than replaced with pointer stubs.
+
+```bash
+git lfs install
+git clone https://github.com/arastu/irtrafficgen.git
+cd irtrafficgen
+```
+
+## Makefile targets
+
+All targets are declared `.PHONY` and can be run from the repository root.
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Compile the binary to `./irtrafficgen` |
+| `make test` | Run all tests with `go test ./...` |
+| `make vet` | Run `go vet ./...` |
+| `make check-assets` | Verify that `internal/assets/geosite.dat` and `internal/assets/geoip.dat` exist and are non-empty |
+| `make all` | Run `check-assets`, `vet`, `test`, and `build` in sequence |
+
+### Build the binary
+
+```bash
+make build
+```
+
+This compiles with `-trimpath` and strips debug info via `-s -w`. The output binary is written to `./irtrafficgen` in the repository root.
+
+### Run all checks before building
+
+```bash
+make all
+```
+
+`make all` is the recommended pre-release sequence: it verifies assets, vets the code, runs tests, and then compiles. Use this before tagging a release or building a Docker image from source.
+
+### Set the version at build time
+
+The `VERSION` and `COMMIT` variables are injected at link time. Override `VERSION` on the command line:
+
+```bash
+VERSION=1.0.0 make build
+```
+
+You can verify the embedded version after building:
+
+```bash
+./irtrafficgen version
+```
+
+## ldflags
+
+The Makefile passes the following ldflags to the linker:
+
+```bash
+-s -w \
+  -X github.com/arastu/irtrafficgen/internal/version.Version=$(VERSION) \
+  -X github.com/arastu/irtrafficgen/internal/version.Commit=$(COMMIT)
+```
+
+- `-s -w` — strip the symbol table and DWARF debug info, reducing binary size.
+- `-X .../Version` — sets the version string reported by `./irtrafficgen version`. Defaults to `dev` if `VERSION` is not set.
+- `-X .../Commit` — sets the short git commit hash. Derived from `git rev-parse --short HEAD`; falls back to `none` if git is unavailable.
+
+## Embedded assets
+
+The binary embeds two V2Ray-format data files at compile time:
+
+| File | Purpose |
+|------|---------|
+| `internal/assets/geosite.dat` | Domain rule lists (Iran-focused geosite entries, e.g. `category-*-ir`) |
+| `internal/assets/geoip.dat` | IP CIDR ranges for `geoip:ir` |
+
+These files are included in the binary via Go's `embed` package. If either file is missing or empty, `make check-assets` will fail and the binary will not be able to load geo data at runtime.
+
+## Updating embedded data
+
+When you want to use newer versions of the `.dat` files, replace them in place and rebuild.
+
+<Steps>
+  <Step title="Verify Git LFS is set up">
+    Confirm that Git LFS is installed and the repository was cloned with LFS support:
+
+    ```bash
+    git lfs status
+    ```
+
+    If the `.dat` files show as pointer files rather than binary data, run `git lfs pull` before proceeding.
+  </Step>
+  <Step title="Replace the data files">
+    Copy your updated files into the assets directory:
+
+    ```bash
+    cp /path/to/new/geosite.dat internal/assets/geosite.dat
+    cp /path/to/new/geoip.dat   internal/assets/geoip.dat
+    ```
+  </Step>
+  <Step title="Verify the files are non-empty">
+    ```bash
+    make check-assets
+    ```
+
+    This runs `test -s` on both files. An empty or missing file will cause the target to fail.
+  </Step>
+  <Step title="Rebuild the binary">
+    ```bash
+    make build
+    ```
+  </Step>
+  <Step title="Verify the embedded data">
+    Use `inspect` to print the loaded geosite lists and geoip stats:
+
+    ```bash
+    ./irtrafficgen inspect
+    ```
+
+    Then run the embedded-data test to confirm validation passes with the new files:
+
+    ```bash
+    go test ./... -run TestDefaultValidateEmbedded
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Never commit empty or placeholder `.dat` files. The binary will compile but will fail at runtime when attempting to load geo data. Always run `make check-assets` before committing changes to `internal/assets/`.
+</Warning>
+
+<Tip>
+  If you are distributing the binary to machines without a Go toolchain, build with `make all` first and copy the resulting `./irtrafficgen` binary. It is fully static (CGO disabled) and has no runtime dependencies beyond the operating system.
+</Tip>

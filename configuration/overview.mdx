@@ -1,0 +1,121 @@
+---
+title: "irtrafficgen YAML config: all top-level key reference"
+description: "Complete reference for the irtrafficgen YAML config file: how to load it, the built-in defaults it starts from, and every top-level key it accepts."
+---
+
+irtrafficgen reads a single YAML file that controls every aspect of its behavior—rate limits, target selection, safety filters, and optional asymmetric traffic. When you run without `--config`, the program starts from built-in defaults defined in `config.Default()`. Any key you set in the file is merged over those defaults; keys you omit keep their default values.
+
+## Loading a config file
+
+Pass the file path with the `--config` flag on the `run` subcommand:
+
+```bash
+irtrafficgen run --config path/to/config.yaml
+```
+
+Two CLI flags can override the `dry_run` key after the file is loaded:
+
+- `--live` forces real network I/O regardless of what `dry_run` says in the file.
+- `--dry-run true|false` overrides the YAML value unless `--live` also appears.
+
+## Built-in defaults
+
+When no config file is provided, irtrafficgen starts from these values:
+
+| Key | Default |
+|-----|---------|
+| `dry_run` | `true` |
+| `limits.global_qps` | `5` |
+| `limits.max_in_flight` | `20` |
+| `limits.per_host_qps` | `0.2` |
+| `limits.https_timeout_seconds` | `15` |
+| `limits.jitter_min_ms` | `50` |
+| `limits.jitter_max_ms` | `500` |
+| `weights.geoip_ir` | `2` |
+| `geosite_lists` | auto-discover `category-*-ir` |
+| `dns_enabled` | `false` |
+| `insecure_tls` | `true` |
+| `per_host_limiter_map_max` | `2048` |
+
+## Top-level keys
+
+<ParamField path="dry_run" type="boolean" default="true">
+  When `true`, no DNS lookups or HTTPS requests are made. The program logs what it would do and, when asymmetric mode is on, adds estimated byte counts to session metrics. Override at runtime with `--live` or `--dry-run false`.
+</ParamField>
+
+<ParamField path="www_root_domain" type="boolean" default="false">
+  For geosite **root-domain** rules, use `www.<domain>` as the request hostname instead of the bare apex.
+</ParamField>
+
+<ParamField path="insecure_tls" type="boolean" default="true">
+  Skip TLS certificate verification on every HTTPS connection. Convenient for lab environments; do not use on untrusted networks.
+</ParamField>
+
+<ParamField path="dns_enabled" type="boolean" default="false">
+  After picking a hostname target, perform a DNS lookup before the HTTPS operation. The result is counted in session metrics but does not change which host is contacted.
+</ParamField>
+
+<ParamField path="dns_server" type="string">
+  DNS server address in `host:port` format (for example `8.8.8.8:53`). Used only when `dns_enabled` is `true`. Overridden by the `DNS_SERVER` environment variable.
+</ParamField>
+
+<ParamField path="sni_for_ip" type="string">
+  TLS Server Name Indication value sent when the chosen target is an IP address rather than a hostname. Many servers require a valid SNI to complete the TLS handshake. Empty may cause handshake failures.
+</ParamField>
+
+<ParamField path="per_host_limiter_map_max" type="integer" default="2048">
+  Maximum number of distinct hosts tracked in the per-host rate-limiter map. Values less than `1` are reset to `2048` at validation time. Oldest entries may be evicted when the map is full.
+</ParamField>
+
+<ParamField path="user_agent" type="string">
+  `User-Agent` header sent with every HTTPS request. When empty or omitted, the program uses `irtrafficgen/<version>`.
+</ParamField>
+
+## Environment variable override
+
+<Note>
+  The `DNS_SERVER` environment variable overrides `dns_server` in the config file. Set it to a `host:port` address to redirect DNS queries without editing the file.
+
+  ```bash
+  DNS_SERVER="1.1.1.1:53" irtrafficgen run --config config.yaml
+  ```
+</Note>
+
+## Minimal working example
+
+This config runs one worker at roughly one request every 11 seconds against geosite targets only, in dry-run mode:
+
+```yaml
+dry_run: true
+
+limits:
+  global_qps: 0.09
+  max_in_flight: 1
+  https_timeout_seconds: 15
+  jitter_min_ms: 50
+  jitter_max_ms: 500
+
+weights:
+  geoip_ir: 0
+
+safety:
+  deny_private_ips: true
+  allowed_domain_suffixes: []
+```
+
+## Config sections
+
+<CardGroup cols={2}>
+  <Card title="Limits" icon="gauge" href="/configuration/limits">
+    Rate limits, concurrency, timeouts, and jitter settings.
+  </Card>
+  <Card title="Targets and weights" icon="crosshairs" href="/configuration/targets">
+    Geosite lists, GeoIP sampling, and per-source weights.
+  </Card>
+  <Card title="Asymmetric traffic" icon="arrows-up-down" href="/configuration/asymmetric">
+    GET, POST, and download/upload bandwidth controls.
+  </Card>
+  <Card title="Safety settings" icon="shield" href="/configuration/safety">
+    Domain allowlists and private-IP filtering.
+  </Card>
+</CardGroup>

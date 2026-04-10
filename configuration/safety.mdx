@@ -1,0 +1,92 @@
+---
+title: "Safety settings: IP filtering and domain allowlists"
+description: "Restrict irtrafficgen traffic with private-IP filtering, domain suffix allowlists, and TLS options that prevent unintended requests in lab environments."
+---
+
+irtrafficgen is designed to run only against targets you own or have explicit authorization to test. The `safety` section and several top-level keys give you direct control over which addresses and hostnames the tool will contact, making it easier to stay within the intended scope of a test environment.
+
+## The `safety` section
+
+<ParamField path="safety.deny_private_ips" type="boolean" default="true">
+  When `true`, any IP address sampled from the `geoip:ir` CIDRs that falls in a private or reserved range (RFC 1918, loopback, link-local, and similar) is discarded and resampled. Only routable public IPs are used. Disable only if you are intentionally testing against a private network you control.
+
+  **Default:** `true`
+</ParamField>
+
+<ParamField path="safety.allowed_domain_suffixes" type="string[]">
+  An allowlist of domain suffixes. When non-empty, any sampled hostname that does not end with one of these suffixes is skipped. This applies to geosite-derived targets only. An empty array (the default) permits all sampled hostnames.
+
+  ```yaml
+  safety:
+    allowed_domain_suffixes:
+      - .ir
+      - example.ir
+  ```
+</ParamField>
+
+## TLS and SNI settings
+
+These keys live at the top level of the config file but are closely related to safe operation.
+
+<ParamField path="insecure_tls" type="boolean" default="true">
+  When `true`, TLS certificate verification is skipped on every HTTPS connection. This is useful in lab environments with self-signed certificates but introduces a risk of connecting to unintended hosts when used on untrusted networks. The built-in default is `true`; set to `false` in any environment where certificate validation matters.
+</ParamField>
+
+<ParamField path="sni_for_ip" type="string">
+  Server Name Indication value sent during the TLS handshake when the target is an IP address. Many HTTPS servers require a valid SNI to route the connection correctly; an empty value may cause handshake failures or silently reach the wrong virtual host. Only used for IP-mode targets from `geoip:ir`.
+</ParamField>
+
+## Tips for safe lab usage
+
+<Steps>
+  <Step title="Keep dry_run: true until ready">
+    The built-in default is `dry_run: true`. Verify that your config produces the expected log output before passing `--live`.
+  </Step>
+  <Step title="Restrict targets with allowed_domain_suffixes">
+    Set `allowed_domain_suffixes` to the domain(s) you control. This prevents stray geosite entries from reaching unintended hosts.
+
+    ```yaml
+    safety:
+      allowed_domain_suffixes:
+        - testlab.example.ir
+    ```
+  </Step>
+  <Step title="Enable insecure_tls only in isolated labs">
+    If your lab uses self-signed certificates, `insecure_tls: true` is acceptable. Set `insecure_tls: false` whenever the test environment has a valid certificate chain.
+  </Step>
+  <Step title="Use GeoIP-only mode with deny_private_ips">
+    When testing against your own IP ranges, set `geosite_lists: []` and target only specific CIDRs. Keep `deny_private_ips: true` unless the CIDRs you are testing are explicitly private and under your control.
+  </Step>
+</Steps>
+
+## Example
+
+A restrictive configuration for a controlled lab environment:
+
+```yaml
+dry_run: false
+
+insecure_tls: false
+sni_for_ip: "www.testlab.example.ir"
+
+safety:
+  deny_private_ips: true
+  allowed_domain_suffixes:
+    - testlab.example.ir
+
+limits:
+  global_qps: 1
+  max_in_flight: 2
+  https_timeout_seconds: 10
+  jitter_min_ms: 100
+  jitter_max_ms: 500
+
+weights:
+  geoip_ir: 0
+
+www_root_domain: false
+```
+
+<Info>
+  `allowed_domain_suffixes` is checked against the sampled hostname string as returned by the geosite list. A suffix of `.ir` matches any host ending in `.ir`, while `example.ir` matches only that exact domain and any subdomain (such as `www.example.ir`).
+</Info>
